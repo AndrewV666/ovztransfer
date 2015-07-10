@@ -41,6 +41,7 @@ function migrate() {
     local inodes_coeff=8 #1/8
     local ostemplate_rpm
     local pid
+    local mult
 
     # Check for target VEID
     ssh $ssh_opts root@$target [ -d /vz/private/$target_veid ]
@@ -79,7 +80,30 @@ function migrate() {
     # Calculate needed diskspace
     eval `grep "^DISKSPACE=" /etc/sysconfig/vz-scripts/$veid.conf`
     required_space=`echo $DISKSPACE | sed "s,.*:,,g"`
-    # Reserve 1/32 for inodes
+    # Parse suffix
+    required_space_suffix=${required_space:$((${#required_space}-1))}
+    case "$required_space_suffix" in
+        T)
+            required_space=`echo $required_space | sed "s,T$,,g"`
+            mult=$((1024*1024*1024))
+            ;;
+        G)
+            required_space=`echo $required_space | sed "s,G$,,g"`
+            mult=$((1024*1024))
+            ;;
+        M)
+            required_space=`echo $required_space | sed "s,M$,,g"`
+            mult=1024
+            required_space=$((required_space*1024))
+            ;;
+        *)
+            mult=1
+            ;; 
+    esac
+    # dots
+    required_space=`echo $required_space | sed "s,\.,\,,g"`
+    required_space=$((required_space*mult))
+    # Reserve inodes_coeff for inodes
     required_space=$((required_space + required_space/inodes_coeff))
 
     # Create destination ploop

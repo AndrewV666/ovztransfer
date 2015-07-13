@@ -139,8 +139,6 @@ function migrate() {
     # Copy config
     scp $ssh_opts /etc/sysconfig/vz-scripts/$veid.conf root@$target:/vz/private/$target_veid/ve.conf > /dev/null 2>&1
     [ $? -ne 0 ] && error "Failed to copy Container config file"
-    ssh $ssh_opts root@$target ln -s /vz/private/$target_veid/ve.conf /etc/vz/conf/$target_veid.conf
-    [ $? -ne 0 ] && error "Failed to create Container config file link"
 
     echo "Container $veid: Setting up destination Container..."
 
@@ -173,6 +171,10 @@ function migrate() {
     # Remove bind_mount
     vzctl exec $veid umount $tmpdir > /dev/null 2>&1
     vzctl exec $veid rm -rf $tmpdir > /dev/null 2>&1
+
+    # Register Container on target
+    ssh $ssh_opts root@$target vzctl register /vz/private/$target_veid $target_veid > /dev/null 2>&1
+    [ $? -ne 0 ] && error "Failed to register Container $target_veid"
 
     # Mount target
     ssh $ssh_opts root@$target vzctl mount $target_veid > /dev/null 2>&1

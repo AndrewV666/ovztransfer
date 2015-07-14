@@ -78,7 +78,7 @@ function migrate() {
     echo "Container $veid: Copying data..."
 
     # Calculate needed diskspace
-    eval `grep "^DISKSPACE=" /etc/sysconfig/vz-scripts/$veid.conf`
+    eval `grep "^DISKSPACE=" $VECONFDIR/$veid.conf`
     required_space=`echo $DISKSPACE | sed "s,.*:,,g"`
     # Parse suffix
     required_space_suffix=${required_space:$((${#required_space}-1))}
@@ -137,7 +137,7 @@ function migrate() {
     [ $? -ne 0 ] && error "Failed to create owner file on $target"
 
     # Copy config
-    scp $ssh_opts /etc/sysconfig/vz-scripts/$veid.conf root@$target:/vz/private/$target_veid/ve.conf > /dev/null 2>&1
+    scp $ssh_opts $VECONFDIR/$veid.conf root@$target:/vz/private/$target_veid/ve.conf > /dev/null 2>&1
     [ $? -ne 0 ] && error "Failed to copy Container config file"
 
     echo "Container $veid: Setting up destination Container..."
@@ -153,7 +153,7 @@ function migrate() {
     [ $? -ne 0 ] && error "Failed to fix destination Container diskspace"
 
     # Check for ostemplate on target
-    eval `grep "^OSTEMPLATE=" /etc/sysconfig/vz-scripts/$veid.conf`
+    eval `grep "^OSTEMPLATE=" $VECONFDIR/$veid.conf`
     ostemplate_rpm=`echo $OSTEMPLATE | sed "s,^\.,,g"`-ez
     ssh $ssh_opts root@$target rpm -q $ostemplate_rpm > /dev/null 2>&1
     if [ $? -ne 0 ]; then
@@ -243,6 +243,15 @@ ssh $SSH_OPTS -o PasswordAuthentication="no" root@$TARGET exit
 [ $? -ne 0 ] && error "ssh $SSH_OPTS key was not configured for $TARGET"
 
 MIGRATION_STARTED=1
+
+# Get path to config dir
+if [ -d /etc/sysconfig/vz-scripts ]; then
+	VECONFDIR=/etc/sysconfig/vz-scripts
+elif [ -d /etc/vz/conf ]; then
+	VECONFDIR=/etc/vz/conf
+else
+	error "Failed to detect Containers config dir"
+fi
 
 # Start migration in parallel
 while [ $COUNT -gt 0 ]; do

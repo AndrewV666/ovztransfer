@@ -42,6 +42,7 @@ function migrate() {
     local ostemplate_rpm
     local pid
     local mult
+    local xattrs=""
 
     # Check for target VEID
     ssh $ssh_opts root@$target [ -d /vz/private/$target_veid ]
@@ -117,7 +118,10 @@ function migrate() {
     [ $? -ne 0 ] && error "Failed to mount ploop on $target"
 
     # Copy data
-    vzctl exec $veid tar -cz -C $tmpdir ./ 2>/dev/null | ssh $ssh_opts root@$target tar -xz -C /vz/root/$target_veid > /dev/null 2>&1
+    # Check for xattrs
+    vzctl exec $veid tar --help | grep "no-xattrs" > /dev/null 2>&1
+    [ $? -eq 0 ] && xattrs="--xattrs"
+    vzctl exec $veid tar --numeric-owner $xattrs -cz -C $tmpdir ./ 2>/dev/null | ssh $ssh_opts root@$target tar --numeric-owner $xattrs -xz -C /vz/root/$target_veid > /dev/null 2>&1
     [ $? -ne 0 ] && error "Failed to copy data"
 
     # Umount target ploop

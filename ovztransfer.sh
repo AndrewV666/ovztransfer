@@ -152,6 +152,10 @@ function migrate() {
         [ $? -ne 0 ] && error "Failed to modify Container config file"
     fi
 
+    # Fix VE_ROOT - proxmox case
+    ssh $ssh_opts root@$target sed -e "s,^VE_ROOT=.*,VE_ROOT=\"/vz/root/$target_veid\",g" -i /vz/private/$target_veid/ve.conf
+    [ $? -ne 0 ] && error "Failed to fix VE_ROOT in Container config file"
+
     # Adjust disk space on destination
     ssh $ssh_opts root@$target sed -e "s,^DISKSPACE=.*,DISKSPACE=\"$required_space:$required_space\",g" -i /vz/private/$target_veid/ve.conf
     [ $? -ne 0 ] && error "Failed to fix destination Container diskspace"

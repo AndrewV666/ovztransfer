@@ -110,7 +110,7 @@ function migrate() {
     # Create destination ploop
     ssh $ssh_opts root@$target mkdir -p /vz/private/$target_veid/root.hdd > /dev/null 2>&1
     [ $? -ne 0 ] && error "Failed to create root.hdd on $target"
-    ssh $ssh_opts root@$target ploop init -s ${required_space}K /vz/private/$target_veid/root.hdd/root.hds > /dev/null 2>&1
+    ssh $ssh_opts root@$target ploop init -t ext4 -s ${required_space}K /vz/private/$target_veid/root.hdd/root.hds > /dev/null 2>&1
     [ $? -ne 0 ] && error "Failed to create ploop on $target"
 
     # Mount ploop

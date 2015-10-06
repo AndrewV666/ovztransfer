@@ -43,6 +43,7 @@ function migrate() {
     local pid
     local mult
     local xattrs=""
+    local block_pid
 
     # Check for target VEID
     ssh $ssh_opts root@$target [ -d /vz/private/$target_veid ]
@@ -73,8 +74,8 @@ function migrate() {
 
     # Bind mount
     tmpdir=`vzctl exec $veid mktemp -d /tmp/bindmnt_XXXXXX`
-    vzctl exec $veid mount -o bind / $tmpdir
-    [ $? -ne 0 ] && error "Failed to bind mount temp directory in Container $veid"
+    vzctl exec $veid "mount -o bind / $tmpdir; tail -f /dev/null > $tmpdir/tmp/lock" >/dev/null 2>&1 &
+    block_pid=$!
 
     echo "Container $veid: Copying data..."
 
@@ -123,6 +124,9 @@ function migrate() {
     [ $? -eq 0 ] && xattrs="--xattrs"
     vzctl exec $veid tar --numeric-owner $xattrs -cz -C $tmpdir ./ 2>/dev/null | ssh $ssh_opts root@$target tar --numeric-owner $xattrs -xz -C /vz/root/$target_veid > /dev/null 2>&1
     [ $? -ne 0 ] && error "Failed to copy data"
+
+    # Leave block
+    kill $block_pid > /dev/null 2>&1
 
     # Umount target ploop
     ssh $ssh_opts root@$target ploop umount /vz/private/$target_veid/root.hdd/DiskDescriptor.xml > /dev/null 2>&1

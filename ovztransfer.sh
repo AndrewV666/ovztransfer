@@ -73,7 +73,7 @@ function migrate() {
 }'`
 
     # Bind mount
-    tmpdir=`vzctl exec $veid mktemp -d /tmp/bindmnt_XXXXXX`
+    tmpdir=`vzctl --quiet exec $veid mktemp -d /tmp/bindmnt_XXXXXX`
     vzctl exec $veid "mount -o bind / $tmpdir; tail -f /dev/null > $tmpdir/tmp/lock" >/dev/null 2>&1 &
     block_pid=$!
 
@@ -120,9 +120,9 @@ function migrate() {
 
     # Copy data
     # Check for xattrs
-    vzctl exec $veid tar --help | grep "no-xattrs" > /dev/null 2>&1
+    vzctl --quiet exec $veid tar --help | grep "no-xattrs" > /dev/null 2>&1
     [ $? -eq 0 ] && xattrs="--xattrs"
-    vzctl exec $veid tar --numeric-owner $xattrs -cz -C $tmpdir ./ 2>/dev/null | ssh $ssh_opts root@$target tar --numeric-owner $xattrs -xz -C /vz/root/$target_veid > /dev/null 2>&1
+    vzctl --quiet exec $veid tar --numeric-owner $xattrs -cz -C $tmpdir ./ 2>/dev/null | ssh $ssh_opts root@$target tar --numeric-owner $xattrs -xz -C /vz/root/$target_veid > /dev/null 2>&1
     [ $? -ne 0 ] && error "Failed to copy data"
 
     # Leave block

@@ -268,7 +268,7 @@ fi
 # Start migration in parallel
 while [ $COUNT -gt 0 ]; do
 	COUNT=$((COUNT-1))
-	(migrate ${VEID_LIST[$COUNT]} ${TARGET_VEID_LIST[$COUNT]} $TARGET $SSH_OPTS ;) &
+	(migrate ${VEID_LIST[$COUNT]} ${TARGET_VEID_LIST[$COUNT]} $TARGET "$SSH_OPTS" ;) &
 	PIDS_LIST[$!]=${VEID_LIST[$COUNT]}
 	echo "Migration of Container ${VEID_LIST[$COUNT]} started"
 done

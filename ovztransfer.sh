@@ -181,7 +181,7 @@ function migrate() {
     grep -q "^NAME=" $VECONFDIR/$veid.conf
     if [ $? -ne 0 ]; then
         eval `grep "^HOSTNAME=" $VECONFDIR/$veid.conf`
-        ssh $ssh_opts root@$target echo NAME=$target_veid-$HOSTNAME >> /vz/private/$target_veid/ve.conf
+        ssh $ssh_opts root@$target "echo NAME=$target_veid-$HOSTNAME >> /vz/private/$target_veid/ve.conf"
     fi
 
     # Stop source

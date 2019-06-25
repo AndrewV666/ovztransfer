@@ -59,12 +59,12 @@ function migrate() {
     echo "Container $veid: Shutting down all possible services..."
 
     # Stop all possible processes inside Container
-    for pid in `vzctl exec $veid ps | grep -E -v "^ *(PID|1) " | awk '{print $1}'`; do
+    for pid in `vzctl exec $veid ps | awk '!/^ *(PID|1) / {print $1}'`; do
         vzctl exec $veid kill -9 $pid > /dev/null 2>&1
     done
 
     # Dump old quota
-    quota_restore_command=`/usr/sbin/vzdqdump $veid -f -G -U -T | grep ^ugid: | awk '{
+    quota_restore_command=`/usr/sbin/vzdqdump $veid -f -G -U -T | awk '/^ugid:/ {
         if ($3 == "1")
                 gparm="-g"
         else
@@ -80,8 +80,7 @@ function migrate() {
     echo "Container $veid: Copying data..."
 
     # Calculate needed diskspace
-    eval `grep "^DISKSPACE=" $VECONFDIR/$veid.conf`
-    required_space=`echo $DISKSPACE | sed "s,.*:,,g"`
+    required_space=`grep "^DISKSPACE=" $VECONFDIR/$veid.conf | sed -e 's,^DISKSPACE=,,g' -e 's,\",,g' -e 's,.*:,,g'`
     # Parse suffix
     required_space_suffix=${required_space:$((${#required_space}-1))}
     case "$required_space_suffix" in
@@ -96,11 +95,10 @@ function migrate() {
         M)
             required_space=`echo $required_space | sed "s,M$,,g"`
             mult=1024
-            required_space=$((required_space*1024))
             ;;
         *)
             mult=1
-            ;; 
+            ;;
     esac
     # dots
     required_space=`echo $required_space | sed "s,\.,\,,g"`

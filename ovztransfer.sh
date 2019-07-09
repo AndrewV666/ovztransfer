@@ -39,6 +39,7 @@ function migrate() {
     local required_space
     local vefstype=5 #ploop
     local inodes_coeff=8 #1/8
+    local total_reserve=$((160*1024)) # 160MiB In KiB
     local ostemplate_rpm
     local pid
     local mult
@@ -103,6 +104,11 @@ function migrate() {
     # dots
     required_space=`echo $required_space | sed "s,\.,\,,g"`
     required_space=$((required_space*mult))
+
+    # get exactly used space
+    du_space=`/usr/bin/du -sk /vz/root/$veid/$tmpdir/ 2>/dev/null | awk '{print $1}'`
+    [ "x$du_space" != "x" -a $((du_space+total_reserve)) -gt $required_space ] && required_space=$((du_space+total_reserve))
+
     # Reserve inodes_coeff for inodes
     required_space=$((required_space + required_space/inodes_coeff))
 

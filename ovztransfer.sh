@@ -122,15 +122,11 @@ function migrate() {
     ssh $ssh_opts root@$target ploop mount -m /vz/root/$target_veid /vz/private/$target_veid/root.hdd/DiskDescriptor.xml > /dev/null 2>&1
     [ $? -ne 0 ] && error "Failed to mount ploop on $target"
 
-    # Remove bind_mount
-    vzctl exec $veid umount $tmpdir > /dev/null 2>&1
-    vzctl exec $veid rm -rf $tmpdir > /dev/null 2>&1
-
     # Copy data
     # Check for xattrs
     vzctl --quiet exec $veid rsync --help | grep "xattrs" > /dev/null 2>&1
     [ $? -eq 0 ] && xattrs="--xattrs"
-    rsync -a -e ssh --numeric-ids $xattrs -H -S /vz/root/$veid root@$target:/vz/root/$target_veid
+    rsync -a -e ssh --numeric-ids $xattrs -H -S /vz/root/$veid$tmpdir root@$target:/vz/root/$target_veid
     [ $? -ne 0 ] && error "Failed to copy data"
 
 
@@ -195,6 +191,10 @@ function migrate() {
 
     # Stop source
     vzctl stop $veid > /dev/null 2>&1
+
+    # Remove bind_mount
+    vzctl exec $veid umount $tmpdir > /dev/null 2>&1
+    vzctl exec $veid rm -rf $tmpdir > /dev/null 2>&1
 
 
     # Register Container on target

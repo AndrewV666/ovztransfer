@@ -124,9 +124,9 @@ function migrate() {
 
     # Copy data
     # Check for xattrs
-    vzctl --quiet exec $veid tar --help | grep "no-xattrs" > /dev/null 2>&1
+    vzctl --quiet exec $veid rsync --help | grep "xattrs" > /dev/null 2>&1
     [ $? -eq 0 ] && xattrs="--xattrs"
-    vzctl --quiet exec $veid tar --numeric-owner $xattrs -cz -C $tmpdir ./ 2>/dev/null | ssh $ssh_opts root@$target tar --numeric-owner $xattrs -xz -C /vz/root/$target_veid > /dev/null 2>&1
+    vzctl --quiet exec $veid rsync -a -e ssh --numeric-ids $xattrs -H -S ./ root@$target:/vz/root/$target_veid
     [ $? -ne 0 ] && error "Failed to copy data"
 
     # Leave block

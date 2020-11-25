@@ -126,7 +126,7 @@ function migrate() {
     # Check for xattrs
     vzctl --quiet exec $veid rsync --help | grep "xattrs" > /dev/null 2>&1
     [ $? -eq 0 ] && xattrs="--xattrs"
-    rsync -a -e ssh --numeric-ids $xattrs -H -S /vz/root/$veid$tmpdir root@$target:/vz/root/$target_veid
+    rsync -a -e ssh --numeric-ids $xattrs -H -S /vz/root/$veid$tmpdir/ root@$target:/vz/root/$target_veid
     [ $? -ne 0 ] && error "Failed to copy data"
 
 

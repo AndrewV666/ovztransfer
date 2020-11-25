@@ -1,6 +1,6 @@
 #!/bin/bash
 
-VERSION=1.0.1
+VERSION=1.0.2
 
 # Additional ssh opts, another key location for example
 #SSH_OPTS="-i /root/id_rsa_target"

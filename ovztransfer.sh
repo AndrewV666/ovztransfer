@@ -1,6 +1,6 @@
 #!/bin/bash
 
-VERSION=1.0.0
+VERSION=1.0.1
 
 # Additional ssh opts, another key location for example
 #SSH_OPTS="-i /root/id_rsa_target"
@@ -68,7 +68,7 @@ function migrate() {
     done
 
     # Dump old quota
-    quota_restore_command=`/usr/sbin/vzdqdump $veid -f -G -U -T | awk '/^ugid:/ {
+    quota_restore_command=`/usr/sbin/vzdqdump $veid -f -G -U -T 2>/dev/null | awk '/^ugid:/ {
         if ($3 == "1")
                 gparm="-g"
         else

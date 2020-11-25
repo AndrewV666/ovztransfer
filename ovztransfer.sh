@@ -1,5 +1,7 @@
 #!/bin/bash
 
+VERSION=1.0.0
+
 # Additional ssh opts, another key location for example
 #SSH_OPTS="-i /root/id_rsa_target"
 SSH_OPTS=""
@@ -23,6 +25,7 @@ function error() {
 }
 
 function usage() {
+    echo "$0 version $VERSION"
     echo "Usage: $0 HOSTNAME SOURCE_VEID0:[TARGET_VEID0] ... [SOURCE_VEIDn:[TARGET_VEIDn]]"
     exit 0
 }

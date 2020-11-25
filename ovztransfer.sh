@@ -11,6 +11,20 @@ declare -a TARGET_VEID_LIST
 declare -a PIDS_LIST
 MIGRATION_STARTED=0
 
+if [ -z "$OVZTR_COMPRESS" ]; then
+    tar_comp_opt=""
+    rsync_comp_opt=""
+else
+    tar_comp_opt="x"
+    rsync_comp_opt="z"
+fi
+
+if [ "x$OVZTR_METHOD" == "xrsync" ]; then
+    METHOD="rsync"
+else
+    METHOD="tar"
+fi
+
 function stop_scripts() {
 	[ $MIGRATION_STARTED -eq 0 ] && return
 	echo "Stopping all migration processes..."
@@ -127,10 +141,17 @@ function migrate() {
 
     # Copy data
     # Check for xattrs
-    vzctl --quiet exec $veid rsync --help | grep "xattrs" > /dev/null 2>&1
-    [ $? -eq 0 ] && xattrs="--xattrs"
-    rsync -a -e ssh --numeric-ids $xattrs -H -S /vz/root/$veid$tmpdir/ root@$target:/vz/root/$target_veid
-    [ $? -ne 0 ] && error "Failed to copy data"
+    if [ "x$METHOD" == "xrsync" ]; then
+        vzctl --quiet exec $veid rsync --help | grep "xattrs" > /dev/null 2>&1
+        [ $? -eq 0 ] && xattrs="--xattrs"
+        rsync -a$rsync_comp_opt -e ssh --numeric-ids $xattrs -H -S /vz/root/$veid$tmpdir/ root@$target:/vz/root/$target_veid
+        [ $? -ne 0 ] && error "Failed to copy data"
+    else
+        vzctl --quiet exec $veid tar --help | grep "no-xattrs" > /dev/null 2>&1
+        [ $? -eq 0 ] && xattrs="--xattrs"
+        vzctl --quiet exec $veid tar --numeric-owner $xattrs -cz -C $tmpdir ./ 2>/dev/null | ssh $ssh_opts root@$target tar --numeric-owner $xattrs -xz -C /vz/root/$target_veid > /dev/null 2>&1
+        [ $? -ne 0 ] && error "Failed to copy data"
+    fi
 
 
     # Leave block

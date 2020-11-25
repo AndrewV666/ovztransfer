@@ -4,6 +4,8 @@
 #SSH_OPTS="-i /root/id_rsa_target"
 SSH_OPTS=""
 
+VERSION=0.9.1
+
 declare -a VEID_LIST
 declare -a TARGET_VEID_LIST
 declare -a PIDS_LIST
@@ -23,6 +25,7 @@ function error() {
 }
 
 function usage() {
+    echo "$0 version $VERSION"
     echo "Usage: $0 HOSTNAME SOURCE_VEID0:[TARGET_VEID0] ... [SOURCE_VEIDn:[TARGET_VEIDn]]"
     exit 0
 }

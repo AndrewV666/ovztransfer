@@ -1,5 +1,7 @@
 #!/bin/bash
 
+VERSION=1.0.6
+
 # Additional ssh opts, another key location for example
 #SSH_OPTS="-i /root/id_rsa_target"
 SSH_OPTS=""
@@ -8,6 +10,18 @@ declare -a VEID_LIST
 declare -a TARGET_VEID_LIST
 declare -a PIDS_LIST
 MIGRATION_STARTED=0
+
+if [ -z "$OVZTR_COMPRESS" ]; then
+    compress_opt=""
+else
+    compress_opt="z"
+fi
+
+if [ "x$OVZTR_METHOD" == "xrsync" ]; then
+    METHOD="rsync"
+else
+    METHOD="tar"
+fi
 
 function stop_scripts() {
 	[ $MIGRATION_STARTED -eq 0 ] && return
@@ -23,6 +37,7 @@ function error() {
 }
 
 function usage() {
+    echo "$0 version $VERSION"
     echo "Usage: $0 HOSTNAME SOURCE_VEID0:[TARGET_VEID0] ... [SOURCE_VEIDn:[TARGET_VEIDn]]"
     exit 0
 }
@@ -60,12 +75,26 @@ function migrate() {
     echo "Container $veid: Shutting down all possible services..."
 
     # Stop all possible processes inside Container
+    PS_IGNORE_REGEX="kthread\|khelper\|/\|ps$"
+    PS_TIMEOUT=90
+    echo "Waiting for container processes to stop..."
+    for pid in `vzctl exec $veid ps | grep -v "${PS_IGNORE_REGEX}" | awk '!/^ *(PID|1) / {print $1}'`; do
+        vzctl exec $veid kill $pid > /dev/null 2>&1
+    done
+
+    for i in `seq 1 $PS_TIMEOUT`; do
+        remaining=`vzctl exec $veid ps | grep -v "${PS_IGNORE_REGEX}" | awk '!/^ *(PID|1) / {print $1}'`
+        [ "x$remaining" == "x" ] && break
+        sleep 1;
+    done
+
+    echo "Killing remaining processes"
     for pid in `vzctl exec $veid ps | awk '!/^ *(PID|1) / {print $1}'`; do
         vzctl exec $veid kill -9 $pid > /dev/null 2>&1
     done
 
     # Dump old quota
-    quota_restore_command=`/usr/sbin/vzdqdump $veid -f -G -U -T | awk '/^ugid:/ {
+    quota_restore_command=`/usr/sbin/vzdqdump $veid -f -G -U -T 2>/dev/null | awk '/^ugid:/ {
         if ($3 == "1")
                 gparm="-g"
         else
@@ -124,10 +153,18 @@ function migrate() {
 
     # Copy data
     # Check for xattrs
-    vzctl --quiet exec $veid tar --help | grep "no-xattrs" > /dev/null 2>&1
-    [ $? -eq 0 ] && xattrs="--xattrs"
-    vzctl --quiet exec $veid tar --numeric-owner $xattrs -cz -C $tmpdir ./ 2>/dev/null | ssh $ssh_opts root@$target tar --numeric-owner $xattrs -xz -C /vz/root/$target_veid > /dev/null 2>&1
-    [ $? -ne 0 ] && error "Failed to copy data"
+    if [ "x$METHOD" == "xrsync" ]; then
+        vzctl --quiet exec $veid rsync --help | grep "xattrs" > /dev/null 2>&1
+        [ $? -eq 0 ] && xattrs="--xattrs"
+        rsync -a$compress_opt -e ssh --numeric-ids $xattrs -H -S /vz/root/$veid$tmpdir/ root@$target:/vz/root/$target_veid
+        [ $? -ne 0 ] && error "Failed to copy data"
+    else
+        vzctl --quiet exec $veid tar --help | grep "no-xattrs" > /dev/null 2>&1
+        [ $? -eq 0 ] && xattrs="--xattrs"
+        vzctl --quiet exec $veid tar --numeric-owner $xattrs -c$compress_opt -C $tmpdir ./ 2>/dev/null | ssh $ssh_opts root@$target tar --numeric-owner $xattrs -x$compress_opt -C /vz/root/$target_veid > /dev/null 2>&1
+        [ $? -ne 0 ] && error "Failed to copy data"
+    fi
+
 
     # Leave block
     kill $block_pid > /dev/null 2>&1
@@ -194,6 +231,7 @@ function migrate() {
     # Remove bind_mount
     vzctl exec $veid umount $tmpdir > /dev/null 2>&1
     vzctl exec $veid rm -rf $tmpdir > /dev/null 2>&1
+
 
     # Register Container on target
     ssh $ssh_opts root@$target vzctl register /vz/private/$target_veid $target_veid > /dev/null 2>&1

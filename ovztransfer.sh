@@ -1,6 +1,6 @@
 #!/bin/bash
 
-VERSION=1.0.4
+VERSION=1.0.5
 
 # Additional ssh opts, another key location for example
 #SSH_OPTS="-i /root/id_rsa_target"
@@ -75,15 +75,15 @@ function migrate() {
     echo "Container $veid: Shutting down all possible services..."
 
     # Stop all possible processes inside Container
-    PS_IGNORE_REGEX="kthread\|khelper\|/"
+    PS_IGNORE_REGEX="kthread\|khelper\|/\|ps$"
     PS_TIMEOUT=90
     echo "Waiting for container processes to stop..."
-    for pid in `vzctl exec $veid ps | grep -v ${PS_IGNORE_REGEX} | awk '!/^ *(PID|1) / {print $1}'`; do
+    for pid in `vzctl exec $veid ps | grep -v "'${PS_IGNORE_REGEX}'" | awk '!/^ *(PID|1) / {print $1}'`; do
         vzctl exec $veid kill $pid > /dev/null 2>&1
     done
 
     for i in `seq 1 $PS_TIMEOUT`; do
-        remaining=`vzctl exec $veid ps | grep -v ${PS_IGNORE_REGEX} | awk '!/^ *(PID|1) / {print $1}'`
+        remaining=`vzctl exec $veid ps | grep -v "'${PS_IGNORE_REGEX}'" | awk '!/^ *(PID|1) / {print $1}'`
         [ "x$remaining" == "x" ] && break
         sleep 1;
     done

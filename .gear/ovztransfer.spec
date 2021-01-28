@@ -1,6 +1,6 @@
 
 Name: ovztransfer
-Version: 1.0.6
+Version: 1.1.1
 Release: alt1
 
 Summary: OpenVZ 6 to 7 transfer tool
@@ -40,6 +40,9 @@ install -pm 755 %name.sh %buildroot%_sbindir
 %_sbindir/*
 
 %changelog
+* Thu Jan 28 2021 Andrew A. Vasilyev <andy@altlinux.org> 1.1.1-alt1
+- 1.1.1
+
 * Thu Nov 26 2020 Andrew A. Vasilyev <andy@altlinux.org> 1.0.6-alt1
 - initial import for ALT
 

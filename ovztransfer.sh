@@ -1,6 +1,6 @@
 #!/bin/bash
 
-VERSION=1.0.6
+VERSION=1.1.1
 
 # Additional ssh opts, another key location for example
 #SSH_OPTS="-i /root/id_rsa_target"
@@ -10,6 +10,7 @@ declare -a VEID_LIST
 declare -a TARGET_VEID_LIST
 declare -a PIDS_LIST
 MIGRATION_STARTED=0
+LOG_FILE="${LOG_FILE:-ovztransfer.log}"
 
 if [ -z "$OVZTR_COMPRESS" ]; then
     compress_opt=""
@@ -18,21 +19,26 @@ else
 fi
 
 if [ "x$OVZTR_METHOD" == "xrsync" ]; then
-    METHOD="rsync"
+    if  grep -q "release 7" /etc/virtuozzo-release 2>/dev/null; then
+        echo "rsync is currently not supported when migrating from Vz7"
+        exit 1
+    else
+        METHOD="rsync"
+    fi
 else
     METHOD="tar"
 fi
 
 function stop_scripts() {
 	[ $MIGRATION_STARTED -eq 0 ] && return
-	echo "Stopping all migration processes..."
+	echo "Stopping all migration processes..." | tee -a ${LOG_FILE}
 	kill -HUP -$$
 }
 
 trap stop_scripts EXIT
 
 function error() {
-    echo $$: $*
+    echo $$: $* | tee -a ${LOG_FILE}
     exit 1
 }
 
@@ -64,22 +70,23 @@ function migrate() {
     # Check for target VEID
     ssh $ssh_opts root@$target [ -d /vz/private/$target_veid ]
     [ $? -eq 0 ] && error "Container $target_veid already exists on $target"
-    ssh $ssh_opts root@$target mkdir -p /vz/private/$target_veid
+    ssh $ssh_opts root@$target mkdir -p /vz/private/$target_veid >> ${LOG_FILE} 2>&1
     [ $? -ne 0 ] && error "Failed to create Container $target_veid private on $target"
-    ssh $ssh_opts root@$target mkdir -p /vz/root/$target_veid
+    ssh $ssh_opts root@$target mkdir -p /vz/root/$target_veid >> ${LOG_FILE} 2>&1
     [ $? -ne 0 ] && error "Failed to create Container $target_veid root on $target"
 
     # Start Container
-    vzctl start $veid --wait > /dev/null 2>&1
+    vzctl start $veid --wait >> ${LOG_FILE} 2>&1
+    [ $? -ne 0 ] && error "Failed to start Container $veid"
 
-    echo "Container $veid: Shutting down all possible services..."
+    echo "Container $veid: Shutting down all possible services..." | tee -a ${LOG_FILE}
 
     # Stop all possible processes inside Container
     PS_IGNORE_REGEX="kthread\|khelper\|/\|ps$"
     PS_TIMEOUT=90
-    echo "Waiting for container processes to stop..."
+    echo "Waiting for container processes to stop..." | tee -a ${LOG_FILE}
     for pid in `vzctl exec $veid ps | grep -v "${PS_IGNORE_REGEX}" | awk '!/^ *(PID|1) / {print $1}'`; do
-        vzctl exec $veid kill $pid > /dev/null 2>&1
+        vzctl exec $veid kill $pid >> ${LOG_FILE} 2>&1
     done
 
     for i in `seq 1 $PS_TIMEOUT`; do
@@ -88,9 +95,9 @@ function migrate() {
         sleep 1;
     done
 
-    echo "Killing remaining processes"
+    echo "Killing remaining processes" | tee -a ${LOG_FILE}
     for pid in `vzctl exec $veid ps | awk '!/^ *(PID|1) / {print $1}'`; do
-        vzctl exec $veid kill -9 $pid > /dev/null 2>&1
+        vzctl exec $veid kill -9 $pid >> ${LOG_FILE} 2>&1
     done
 
     # Dump old quota
@@ -107,7 +114,7 @@ function migrate() {
     vzctl exec $veid "mount -o bind / $tmpdir; tail -f /dev/null > $tmpdir/tmp/lock" >/dev/null 2>&1 &
     block_pid=$!
 
-    echo "Container $veid: Copying data..."
+    echo "Container $veid: Copying data..." | tee -a ${LOG_FILE}
 
     # Calculate needed diskspace
     required_space=`grep "^DISKSPACE=" $VECONFDIR/$veid.conf | sed -e 's,^DISKSPACE=,,g' -e 's,\",,g' -e 's,.*:,,g'`
@@ -142,13 +149,13 @@ function migrate() {
     required_space=$((required_space + required_space/inodes_coeff))
 
     # Create destination ploop
-    ssh $ssh_opts root@$target mkdir -p /vz/private/$target_veid/root.hdd > /dev/null 2>&1
+    ssh $ssh_opts root@$target mkdir -p /vz/private/$target_veid/root.hdd >> ${LOG_FILE} 2>&1
     [ $? -ne 0 ] && error "Failed to create root.hdd on $target"
-    ssh $ssh_opts root@$target ploop init -t ext4 -s ${required_space}K /vz/private/$target_veid/root.hdd/root.hds > /dev/null 2>&1
+    ssh $ssh_opts root@$target ploop init -t ext4 -s ${required_space}K /vz/private/$target_veid/root.hdd/root.hds >> ${LOG_FILE} 2>&1
     [ $? -ne 0 ] && error "Failed to create ploop on $target"
 
     # Mount ploop
-    ssh $ssh_opts root@$target ploop mount -m /vz/root/$target_veid /vz/private/$target_veid/root.hdd/DiskDescriptor.xml > /dev/null 2>&1
+    ssh $ssh_opts root@$target ploop mount -m /vz/root/$target_veid /vz/private/$target_veid/root.hdd/DiskDescriptor.xml >> ${LOG_FILE} 2>&1
     [ $? -ne 0 ] && error "Failed to mount ploop on $target"
 
     # Copy data
@@ -156,21 +163,21 @@ function migrate() {
     if [ "x$METHOD" == "xrsync" ]; then
         vzctl --quiet exec $veid rsync --help | grep "xattrs" > /dev/null 2>&1
         [ $? -eq 0 ] && xattrs="--xattrs"
-        rsync -a$compress_opt -e ssh --numeric-ids $xattrs -H -S /vz/root/$veid$tmpdir/ root@$target:/vz/root/$target_veid
+        rsync -a$compress_opt -e ssh --numeric-ids $xattrs -H -S /vz/root/$veid/$tmpdir/ root@$target:/vz/root/$target_veid >> ${LOG_FILE} 2>&1
         [ $? -ne 0 ] && error "Failed to copy data"
     else
         vzctl --quiet exec $veid tar --help | grep "no-xattrs" > /dev/null 2>&1
         [ $? -eq 0 ] && xattrs="--xattrs"
-        vzctl --quiet exec $veid tar --numeric-owner $xattrs -c$compress_opt -C $tmpdir ./ 2>/dev/null | ssh $ssh_opts root@$target tar --numeric-owner $xattrs -x$compress_opt -C /vz/root/$target_veid > /dev/null 2>&1
+        vzctl --quiet exec $veid tar --numeric-owner $xattrs -c$compress_opt -C $tmpdir ./ 2>/dev/null | ssh $ssh_opts root@$target tar --numeric-owner $xattrs -x$compress_opt -C /vz/root/$target_veid >> ${LOG_FILE} 2>&1
         [ $? -ne 0 ] && error "Failed to copy data"
     fi
 
 
     # Leave block
-    kill $block_pid > /dev/null 2>&1
+    kill $block_pid >> ${LOG_FILE} 2>&1
 
     # Umount target ploop
-    ssh $ssh_opts root@$target ploop umount /vz/private/$target_veid/root.hdd/DiskDescriptor.xml > /dev/null 2>&1
+    ssh $ssh_opts root@$target ploop umount /vz/private/$target_veid/root.hdd/DiskDescriptor.xml >> ${LOG_FILE} 2>&1
     [ $? -ne 0 ] && error "Failed to umount ploop on $target"
 
     # Fill private area
@@ -182,14 +189,14 @@ function migrate() {
     done
     ssh $ssh_opts root@$target ln -s root.hdd/templates /vz/private/$target_veid/templates
     [ $? -ne 0 ] && error "Failed to templates dir link on $target"
-    ssh $ssh_opts root@$target 'echo -n `hostname` > /vz/private/$target_veid/.owner' > /dev/null 2>&1
+    ssh $ssh_opts root@$target 'echo -n `hostname` > /vz/private/$target_veid/.owner' >> ${LOG_FILE} 2>&1
     [ $? -ne 0 ] && error "Failed to create owner file on $target"
 
     # Copy config
-    scp $ssh_opts $VECONFDIR/$veid.conf root@$target:/vz/private/$target_veid/ve.conf > /dev/null 2>&1
+    scp $ssh_opts $VECONFDIR/$veid.conf root@$target:/vz/private/$target_veid/ve.conf >> ${LOG_FILE} 2>&1
     [ $? -ne 0 ] && error "Failed to copy Container config file"
 
-    echo "Container $veid: Setting up destination Container..."
+    echo "Container $veid: Setting up destination Container..." | tee -a ${LOG_FILE}
 
     # Modify VEID inside config
     if [ $target_veid != $veid ]; then
@@ -208,9 +215,9 @@ function migrate() {
     # Check for ostemplate on target
     eval `grep "^OSTEMPLATE=" $VECONFDIR/$veid.conf`
     ostemplate_rpm=`echo $OSTEMPLATE | sed "s,^\.,,g"`-ez
-    ssh $ssh_opts root@$target rpm -q $ostemplate_rpm > /dev/null 2>&1
+    ssh $ssh_opts root@$target rpm -q $ostemplate_rpm >> ${LOG_FILE}  2>&1
     if [ $? -ne 0 ]; then
-        ssh $ssh_opts root@$target yum install -y $ostemplate_rpm > /dev/null 2>&1
+        ssh $ssh_opts root@$target yum install -y $ostemplate_rpm >> ${LOG_FILE} 2>&1
         if [ $? -ne 0 ]; then
             # And disable template if not supported
             ssh $ssh_opts root@$target sed -e "s,^OSTEMPLATE=,#OSTEMPLATE=,g" -i /vz/private/$target_veid/ve.conf
@@ -226,59 +233,59 @@ function migrate() {
     fi
 
     # Stop source
-    vzctl stop $veid > /dev/null 2>&1
+    vzctl stop $veid >> ${LOG_FILE} 2>&1
 
     # Remove bind_mount
-    vzctl exec $veid umount $tmpdir > /dev/null 2>&1
-    vzctl exec $veid rm -rf $tmpdir > /dev/null 2>&1
+    vzctl exec $veid umount $tmpdir >> ${LOG_FILE} 2>&1
+    vzctl exec $veid rm -rf $tmpdir >> ${LOG_FILE} 2>&1
 
 
     # Register Container on target
-    ssh $ssh_opts root@$target vzctl register /vz/private/$target_veid $target_veid > /dev/null 2>&1
+    ssh $ssh_opts root@$target vzctl register /vz/private/$target_veid $target_veid >> ${LOG_FILE} 2>&1
     [ $? -ne 0 ] && error "Failed to register Container $target_veid"
 
     # Mount target
-    ssh $ssh_opts root@$target vzctl mount $target_veid > /dev/null 2>&1
+    ssh $ssh_opts root@$target vzctl mount $target_veid >> ${LOG_FILE} 2>&1
     [ $? -ne 0 ] && error "Failed to mount destination Container"
 
     # Remove
-    ssh $ssh_opts root@$target rm -f /vz/root/$target_veid/aquota.* > /dev/null 2>&1
+    ssh $ssh_opts root@$target rm -f /vz/root/$target_veid/aquota.*
     ssh $ssh_opts root@$target "find /vz/root/$target_veid/etc -name *vzquota* 2>/dev/null | xargs rm -f > /dev/null 2>&1"
 
     # Change
-    ssh $ssh_opts root@$target rm -f /vz/root/$target_veid/etc/mtab > /dev/null 2>&1
+    ssh $ssh_opts root@$target rm -f /vz/root/$target_veid/etc/mtab
     ssh $ssh_opts root@$target ln -s /proc/mounts /vz/root/$target_veid/etc/mtab
     [ $? -ne 0 ] && error "Failed to fix /etc/mtab in destination Container"
 
     # Create devices
-    ssh $ssh_opts root@$target "mknod /vz/root/$target_veid/dev/ptmx c 5 2; chmod 666 /vz/root/$target_veid/dev/ptmx" > /dev/null 2>&1
-    ssh $ssh_opts root@$target mknod /vz/root/$target_veid/etc/udev/devices/ptmx c 5 2 > /dev/null 2>&1
+    ssh $ssh_opts root@$target "mknod /vz/root/$target_veid/dev/ptmx c 5 2; chmod 666 /vz/root/$target_veid/dev/ptmx" >> ${LOG_FILE} 2>&1
+    ssh $ssh_opts root@$target mknod /vz/root/$target_veid/etc/udev/devices/ptmx c 5 2 >> ${LOG_FILE} 2>&1
 
     for i in 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
         a=`awk -v num=$i 'BEGIN { printf("%x\n", num) }'`
-        ssh $ssh_opts root@$target mknod /vz/root/$target_veid/dev/ttyp$a c 3 $i > /dev/null 2>&1
-        ssh $ssh_opts root@$target mknod /vz/root/$target_veid/etc/udev/devices/ttyp$a c 3 $i > /dev/null 2>&1
-        ssh $ssh_opts root@$target mknod /vz/root/$target_veid/dev/ptyp$a c 2 $i > /dev/null 2>&1
-        ssh $ssh_opts root@$target mknod /vz/root/$target_veid/etc/udev/devices/ptyp$a c 2 $i > /dev/null 2>&1
+        ssh $ssh_opts root@$target mknod /vz/root/$target_veid/dev/ttyp$a c 3 $i >> ${LOG_FILE} 2>&1
+        ssh $ssh_opts root@$target mknod /vz/root/$target_veid/etc/udev/devices/ttyp$a c 3 $i >> ${LOG_FILE} 2>&1
+        ssh $ssh_opts root@$target mknod /vz/root/$target_veid/dev/ptyp$a c 2 $i >> ${LOG_FILE} 2>&1
+        ssh $ssh_opts root@$target mknod /vz/root/$target_veid/etc/udev/devices/ptyp$a c 2 $i >> ${LOG_FILE} 2>&1
     done
 
     # Try to restore quotas if any
     if [ "x$quota_restore_command" != "x" ]; then
         # Start target
-        ssh $ssh_opts root@$target vzctl start $target_veid --wait > /dev/null 2>&1
+        ssh $ssh_opts root@$target vzctl start $target_veid --wait >> ${LOG_FILE} 2>&1
         [ $? -ne 0 ] && error "Failed to start destination Container"
 
         # Restore quotas
-        ssh $ssh_opts root@$target "vzctl exec $target_veid \"$quota_restore_command\"" > /dev/null 2>&1
+        ssh $ssh_opts root@$target "vzctl exec $target_veid \"$quota_restore_command\"" >> ${LOG_FILE} 2>&1
         [ $? -ne 0 ] && error "Failed to restore quota"
 
         # Stop target
-        ssh $ssh_opts root@$target vzctl stop $target_veid > /dev/null 2>&1
+        ssh $ssh_opts root@$target vzctl stop $target_veid >> ${LOG_FILE} 2>&1
     else
-        ssh $ssh_opts root@$target vzctl umount $target_veid > /dev/null 2>&1
+        ssh $ssh_opts root@$target vzctl umount $target_veid >> ${LOG_FILE} 2>&1
     fi
 
-    echo "Container $veid: Done, cleaning..."
+    echo "Container $veid: Done, cleaning..." | tee -a ${LOG_FILE}
 }
 
 # Check for parameters
@@ -297,7 +304,7 @@ done
 
 [ -z "$TARGET" -o ${#VEID_LIST[@]} -eq 0 ] && usage
 
-echo "Checking target host parameters..."
+echo "Checking target host parameters..." | tee -a ${LOG_FILE}
 
 # Check for ssh $SSH_OPTS key
 ssh $SSH_OPTS -o PasswordAuthentication="no" root@$TARGET exit
@@ -319,7 +326,7 @@ while [ $COUNT -gt 0 ]; do
 	COUNT=$((COUNT-1))
 	(migrate ${VEID_LIST[$COUNT]} ${TARGET_VEID_LIST[$COUNT]} $TARGET "$SSH_OPTS" ;) &
 	PIDS_LIST[$!]=${VEID_LIST[$COUNT]}
-	echo "Migration of Container ${VEID_LIST[$COUNT]} started"
+	echo "Migration of Container ${VEID_LIST[$COUNT]} started" | tee -a ${LOG_FILE}
 done
 
 PIDS=`jobs -p`
@@ -328,20 +335,20 @@ RC=0
 while [ ! -z "$PIDS" ]; do
 	for pid in $PIDS; do
 		sleep 1
-		kill -0 $pid > /dev/null 2>&1
+		kill -0 $pid >> ${LOG_FILE} 2>&1
 		[ $? -eq 0 ] && continue
 		wait $pid
 		err=$?
 		if [ $err -ne 0 ]; then
-			echo "Migraton of Container ${PIDS_LIST[$pid]} failed with error $err"
+			echo "Migraton of Container ${PIDS_LIST[$pid]} failed with error $err" | tee -a ${LOG_FILE}
 			RC=1
 		else
-			echo "Migration of Container ${PIDS_LIST[$pid]} completed successfully"
+			echo "Migration of Container ${PIDS_LIST[$pid]} completed successfully" | tee -a ${LOG_FILE}
 		fi
 		PIDS=`echo $PIDS | sed "s,$pid,,g"`
 	done
 done
 
-echo "All done"
+echo "All done" | tee -a ${LOG_FILE}
 
 exit $RC

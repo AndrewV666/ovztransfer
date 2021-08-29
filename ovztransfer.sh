@@ -1,6 +1,6 @@
 #!/bin/bash
 
-VERSION=1.1.1
+VERSION=1.2.0
 
 # Additional ssh opts, another key location for example
 #SSH_OPTS="-i /root/id_rsa_target"
@@ -11,6 +11,9 @@ declare -a TARGET_VEID_LIST
 declare -a PIDS_LIST
 MIGRATION_STARTED=0
 LOG_FILE="${LOG_FILE:-ovztransfer.log}"
+
+VE_ROOT=`grep ^VE_ROOT= /etc/vz/vz.conf | sed 's/VE_ROOT=//' | sed 's#/$VEID##' | sed 's/"//g' | sed "s/'//g"`
+VE_PRIVATE=`grep ^VE_PRIVATE= /etc/vz/vz.conf | sed 's/VE_PRIVATE=//' | sed 's#/$VEID##' | sed 's/"//g' | sed "s/'//g"`
 
 if [ -z "$OVZTR_COMPRESS" ]; then
     compress_opt=""
@@ -67,12 +70,15 @@ function migrate() {
     local xattrs=""
     local block_pid
 
+    REMOTE_VE_ROOT=`ssh $ssh_opts root@$target grep ^VE_ROOT= /etc/vz/vz.conf | sed 's/VE_ROOT=//' | sed 's#/$VEID##' | sed 's/"//g' | sed "s/'//g"`
+    REMOTE_VE_PRIVATE=`ssh $ssh_opts root@$target grep ^VE_PRIVATE= /etc/vz/vz.conf | sed 's/VE_PRIVATE=//' | sed 's#/$VEID##' | sed 's/"//g' | sed "s/'//g"`
+
     # Check for target VEID
-    ssh $ssh_opts root@$target [ -d /vz/private/$target_veid ]
+    ssh $ssh_opts root@$target [ -d ${REMOTE_VE_PRIVATE}/$target_veid ]
     [ $? -eq 0 ] && error "Container $target_veid already exists on $target"
-    ssh $ssh_opts root@$target mkdir -p /vz/private/$target_veid >> ${LOG_FILE} 2>&1
+    ssh $ssh_opts root@$target mkdir -p ${REMOTE_VE_PRIVATE}/$target_veid >> ${LOG_FILE} 2>&1
     [ $? -ne 0 ] && error "Failed to create Container $target_veid private on $target"
-    ssh $ssh_opts root@$target mkdir -p /vz/root/$target_veid >> ${LOG_FILE} 2>&1
+    ssh $ssh_opts root@$target mkdir -p ${REMOTE_VE_ROOT}/$target_veid >> ${LOG_FILE} 2>&1
     [ $? -ne 0 ] && error "Failed to create Container $target_veid root on $target"
 
     # Start Container
@@ -142,20 +148,20 @@ function migrate() {
     required_space=$((required_space*mult))
 
     # get exactly used space
-    du_space=`/usr/bin/du -sk /vz/root/$veid/$tmpdir/ 2>/dev/null | awk '{print $1}'`
+    du_space=`/usr/bin/du -sk ${VE_ROOT}/$veid/$tmpdir/ 2>/dev/null | awk '{print $1}'`
     [ "x$du_space" != "x" -a $((du_space+total_reserve)) -gt $required_space ] && required_space=$((du_space+total_reserve))
 
     # Reserve inodes_coeff for inodes
     required_space=$((required_space + required_space/inodes_coeff))
 
     # Create destination ploop
-    ssh $ssh_opts root@$target mkdir -p /vz/private/$target_veid/root.hdd >> ${LOG_FILE} 2>&1
+    ssh $ssh_opts root@$target mkdir -p ${REMOTE_VE_PRIVATE}/$target_veid/root.hdd >> ${LOG_FILE} 2>&1
     [ $? -ne 0 ] && error "Failed to create root.hdd on $target"
-    ssh $ssh_opts root@$target ploop init -t ext4 -s ${required_space}K /vz/private/$target_veid/root.hdd/root.hds >> ${LOG_FILE} 2>&1
+    ssh $ssh_opts root@$target ploop init -t ext4 -s ${required_space}K ${REMOTE_VE_PRIVATE}/$target_veid/root.hdd/root.hds >> ${LOG_FILE} 2>&1
     [ $? -ne 0 ] && error "Failed to create ploop on $target"
 
     # Mount ploop
-    ssh $ssh_opts root@$target ploop mount -m /vz/root/$target_veid /vz/private/$target_veid/root.hdd/DiskDescriptor.xml >> ${LOG_FILE} 2>&1
+    ssh $ssh_opts root@$target ploop mount -m ${REMOTE_VE_ROOT}/$target_veid ${REMOTE_VE_PRIVATE}/$target_veid/root.hdd/DiskDescriptor.xml >> ${LOG_FILE} 2>&1
     [ $? -ne 0 ] && error "Failed to mount ploop on $target"
 
     # Copy data
@@ -163,12 +169,12 @@ function migrate() {
     if [ "x$METHOD" == "xrsync" ]; then
         vzctl --quiet exec $veid rsync --help | grep "xattrs" > /dev/null 2>&1
         [ $? -eq 0 ] && xattrs="--xattrs"
-        rsync -a$compress_opt -e ssh --numeric-ids $xattrs -H -S /vz/root/$veid/$tmpdir/ root@$target:/vz/root/$target_veid >> ${LOG_FILE} 2>&1
+        rsync -a$compress_opt -e ssh --numeric-ids $xattrs -H -S ${VE_ROOT}/$veid/$tmpdir/ root@$target:${REMOTE_VE_ROOT}/$target_veid >> ${LOG_FILE} 2>&1
         [ $? -ne 0 ] && error "Failed to copy data"
     else
         vzctl --quiet exec $veid tar --help | grep "no-xattrs" > /dev/null 2>&1
         [ $? -eq 0 ] && xattrs="--xattrs"
-        vzctl --quiet exec $veid tar --numeric-owner $xattrs -c$compress_opt -C $tmpdir ./ 2>/dev/null | ssh $ssh_opts root@$target tar --numeric-owner $xattrs -x$compress_opt -C /vz/root/$target_veid >> ${LOG_FILE} 2>&1
+        vzctl --quiet exec $veid tar --numeric-owner $xattrs -c$compress_opt -C $tmpdir ./ 2>/dev/null | ssh $ssh_opts root@$target tar --numeric-owner $xattrs -x$compress_opt -C ${REMOTE_VE_ROOT}/$target_veid >> ${LOG_FILE} 2>&1
         [ $? -ne 0 ] && error "Failed to copy data"
     fi
 
@@ -177,39 +183,39 @@ function migrate() {
     kill $block_pid >> ${LOG_FILE} 2>&1
 
     # Umount target ploop
-    ssh $ssh_opts root@$target ploop umount /vz/private/$target_veid/root.hdd/DiskDescriptor.xml >> ${LOG_FILE} 2>&1
+    ssh $ssh_opts root@$target ploop umount ${REMOTE_VE_PRIVATE}/$target_veid/root.hdd/DiskDescriptor.xml >> ${LOG_FILE} 2>&1
     [ $? -ne 0 ] && error "Failed to umount ploop on $target"
 
     # Fill private area
-    ssh $ssh_opts root@$target ln -s $vefstype /vz/private/$target_veid/.ve.layout
+    ssh $ssh_opts root@$target ln -s $vefstype ${REMOTE_VE_PRIVATE}/$target_veid/.ve.layout
     [ $? -ne 0 ] && error "Failed to create layout on $target"
     for dir in scripts dump fs root.hdd/templates; do
-        ssh $ssh_opts root@$target mkdir /vz/private/$target_veid/$dir
+        ssh $ssh_opts root@$target mkdir ${REMOTE_VE_PRIVATE}/$target_veid/$dir
         [ $? -ne 0 ] && error "Failed to create $dir dir on $target"
     done
-    ssh $ssh_opts root@$target ln -s root.hdd/templates /vz/private/$target_veid/templates
+    ssh $ssh_opts root@$target ln -s root.hdd/templates ${REMOTE_VE_PRIVATE}/$target_veid/templates
     [ $? -ne 0 ] && error "Failed to templates dir link on $target"
-    ssh $ssh_opts root@$target 'echo -n `hostname` > /vz/private/$target_veid/.owner' >> ${LOG_FILE} 2>&1
+    ssh $ssh_opts root@$target 'echo -n `hostname` > ${REMOTE_VE_PRIVATE}/$target_veid/.owner' >> ${LOG_FILE} 2>&1
     [ $? -ne 0 ] && error "Failed to create owner file on $target"
 
     # Copy config
-    scp $ssh_opts $VECONFDIR/$veid.conf root@$target:/vz/private/$target_veid/ve.conf >> ${LOG_FILE} 2>&1
+    scp $ssh_opts $VECONFDIR/$veid.conf root@$target:${REMOTE_VE_PRIVATE}/$target_veid/ve.conf >> ${LOG_FILE} 2>&1
     [ $? -ne 0 ] && error "Failed to copy Container config file"
 
     echo "Container $veid: Setting up destination Container..." | tee -a ${LOG_FILE}
 
     # Modify VEID inside config
     if [ $target_veid != $veid ]; then
-        ssh $ssh_opts root@$target sed -e "s,^VEID=.*,VEID=\"$target_veid\",g" -i /vz/private/$target_veid/ve.conf
+        ssh $ssh_opts root@$target sed -e "s,^VEID=.*,VEID=\"$target_veid\",g" -i ${REMOTE_VE_PRIVATE}/$target_veid/ve.conf
         [ $? -ne 0 ] && error "Failed to modify Container config file"
     fi
 
     # Fix VE_ROOT - proxmox case
-    ssh $ssh_opts root@$target sed -e "s,^VE_ROOT=.*,VE_ROOT=\"/vz/root/$target_veid\",g" -i /vz/private/$target_veid/ve.conf
+    ssh $ssh_opts root@$target sed -e "s,^VE_ROOT=.*,VE_ROOT=\"${REMOTE_VE_ROOT}/$target_veid\",g" -i ${REMOTE_VE_PRIVATE}/$target_veid/ve.conf
     [ $? -ne 0 ] && error "Failed to fix VE_ROOT in Container config file"
 
     # Adjust disk space on destination
-    ssh $ssh_opts root@$target sed -e "s,^DISKSPACE=.*,DISKSPACE=\"$required_space:$required_space\",g" -i /vz/private/$target_veid/ve.conf
+    ssh $ssh_opts root@$target sed -e "s,^DISKSPACE=.*,DISKSPACE=\"$required_space:$required_space\",g" -i ${REMOTE_VE_PRIVATE}/$target_veid/ve.conf
     [ $? -ne 0 ] && error "Failed to fix destination Container diskspace"
 
     # Check for ostemplate on target
@@ -220,7 +226,7 @@ function migrate() {
         ssh $ssh_opts root@$target yum install -y $ostemplate_rpm >> ${LOG_FILE} 2>&1
         if [ $? -ne 0 ]; then
             # And disable template if not supported
-            ssh $ssh_opts root@$target sed -e "s,^OSTEMPLATE=,#OSTEMPLATE=,g" -i /vz/private/$target_veid/ve.conf
+            ssh $ssh_opts root@$target sed -e "s,^OSTEMPLATE=,#OSTEMPLATE=,g" -i ${REMOTE_VE_PRIVATE}/$target_veid/ve.conf
             [ $? -ne 0 ] && error "Failed to disable param OSTEMPLATE in Container config file"
         fi
     fi
@@ -229,7 +235,7 @@ function migrate() {
     grep -q "^NAME=" $VECONFDIR/$veid.conf
     if [ $? -ne 0 ]; then
         eval `grep "^HOSTNAME=" $VECONFDIR/$veid.conf`
-        ssh $ssh_opts root@$target "echo NAME=$target_veid-$HOSTNAME >> /vz/private/$target_veid/ve.conf"
+        ssh $ssh_opts root@$target "echo NAME=$target_veid-$HOSTNAME >> ${REMOTE_VE_PRIVATE}/$target_veid/ve.conf"
     fi
 
     # Stop source
@@ -241,7 +247,7 @@ function migrate() {
 
 
     # Register Container on target
-    ssh $ssh_opts root@$target vzctl register /vz/private/$target_veid $target_veid >> ${LOG_FILE} 2>&1
+    ssh $ssh_opts root@$target vzctl register ${REMOTE_VE_PRIVATE}/$target_veid $target_veid >> ${LOG_FILE} 2>&1
     [ $? -ne 0 ] && error "Failed to register Container $target_veid"
 
     # Mount target
@@ -249,24 +255,24 @@ function migrate() {
     [ $? -ne 0 ] && error "Failed to mount destination Container"
 
     # Remove
-    ssh $ssh_opts root@$target rm -f /vz/root/$target_veid/aquota.*
-    ssh $ssh_opts root@$target "find /vz/root/$target_veid/etc -name *vzquota* 2>/dev/null | xargs rm -f > /dev/null 2>&1"
+    ssh $ssh_opts root@$target rm -f ${REMOTE_VE_ROOT}/$target_veid/aquota.*
+    ssh $ssh_opts root@$target "find ${REMOTE_VE_ROOT}/$target_veid/etc -name *vzquota* 2>/dev/null | xargs rm -f > /dev/null 2>&1"
 
     # Change
-    ssh $ssh_opts root@$target rm -f /vz/root/$target_veid/etc/mtab
-    ssh $ssh_opts root@$target ln -s /proc/mounts /vz/root/$target_veid/etc/mtab
+    ssh $ssh_opts root@$target rm -f ${REMOTE_VE_ROOT}/$target_veid/etc/mtab
+    ssh $ssh_opts root@$target ln -s /proc/mounts ${REMOTE_VE_ROOT}/$target_veid/etc/mtab
     [ $? -ne 0 ] && error "Failed to fix /etc/mtab in destination Container"
 
     # Create devices
-    ssh $ssh_opts root@$target "mknod /vz/root/$target_veid/dev/ptmx c 5 2; chmod 666 /vz/root/$target_veid/dev/ptmx" >> ${LOG_FILE} 2>&1
-    ssh $ssh_opts root@$target mknod /vz/root/$target_veid/etc/udev/devices/ptmx c 5 2 >> ${LOG_FILE} 2>&1
+    ssh $ssh_opts root@$target "mknod ${REMOTE_VE_ROOT}/$target_veid/dev/ptmx c 5 2; chmod 666 ${REMOTE_VE_ROOT}/$target_veid/dev/ptmx" >> ${LOG_FILE} 2>&1
+    ssh $ssh_opts root@$target mknod ${REMOTE_VE_ROOT}/$target_veid/etc/udev/devices/ptmx c 5 2 >> ${LOG_FILE} 2>&1
 
     for i in 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
         a=`awk -v num=$i 'BEGIN { printf("%x\n", num) }'`
-        ssh $ssh_opts root@$target mknod /vz/root/$target_veid/dev/ttyp$a c 3 $i >> ${LOG_FILE} 2>&1
-        ssh $ssh_opts root@$target mknod /vz/root/$target_veid/etc/udev/devices/ttyp$a c 3 $i >> ${LOG_FILE} 2>&1
-        ssh $ssh_opts root@$target mknod /vz/root/$target_veid/dev/ptyp$a c 2 $i >> ${LOG_FILE} 2>&1
-        ssh $ssh_opts root@$target mknod /vz/root/$target_veid/etc/udev/devices/ptyp$a c 2 $i >> ${LOG_FILE} 2>&1
+        ssh $ssh_opts root@$target mknod ${REMOTE_VE_ROOT}/$target_veid/dev/ttyp$a c 3 $i >> ${LOG_FILE} 2>&1
+        ssh $ssh_opts root@$target mknod ${REMOTE_VE_ROOT}/$target_veid/etc/udev/devices/ttyp$a c 3 $i >> ${LOG_FILE} 2>&1
+        ssh $ssh_opts root@$target mknod ${REMOTE_VE_ROOT}/$target_veid/dev/ptyp$a c 2 $i >> ${LOG_FILE} 2>&1
+        ssh $ssh_opts root@$target mknod ${REMOTE_VE_ROOT}/$target_veid/etc/udev/devices/ptyp$a c 2 $i >> ${LOG_FILE} 2>&1
     done
 
     # Try to restore quotas if any

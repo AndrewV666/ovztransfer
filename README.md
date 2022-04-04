@@ -6,8 +6,6 @@ CT, VE - stand for Container, or Virtual Environment.
 CTID, VEID - Container's ID.
 ```
 
-## ovztransfer.sh - original script from Virtuozzo
-
 ## vswap.sh - change CT config to VSwap format
 ### Usage:
 ```

@@ -1,7 +1,7 @@
 
 Name: ovztransfer
 Version: 1.2.0
-Release: alt1
+Release: alt2
 
 Summary: OpenVZ 6 to 7 transfer tool
 License: GPLv2
@@ -15,7 +15,7 @@ Source: %name-%version.tar
 
 ExclusiveArch: x86_64
 
-Requires: openssh-common
+Requires: openssh-clients
 
 %description
 OpenVZ is an Operating System-level server virtualization solution, built
@@ -26,7 +26,7 @@ like a stand-alone server; VEs can be rebooted independently and have
 root access, users, IP addresses, memory, processes, files, applications,
 system libraries and configuration files.
 
-This package contains the transfer tool to migrate Virtual Environments
+This package contains the transfer tools to migrate Virtual Environments
 from OpenVZ 6 to OpenVZ 7.
 
 %prep
@@ -37,11 +37,17 @@ from OpenVZ 6 to OpenVZ 7.
 %install
 mkdir -p %buildroot%_sbindir
 install -pm 755 %name.sh %buildroot%_sbindir
+install -pm 755 ovz6to7.sh %buildroot%_sbindir
+install -pm 755 vswap.sh %buildroot%_sbindir
 
 %files
+%doc README.md
 %_sbindir/*
 
 %changelog
+* Thu Mar 24 2022 Andrew A. Vasilyev <andy@altlinux.org> 1.2.0-alt2
+- add ovz6to7.sh and vswap.sh special for ALT distribution
+
 * Wed Sep 01 2021 Andrew A. Vasilyev <andy@altlinux.org> 1.2.0-alt1
 - 1.2.0
 
